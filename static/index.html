@@ -1,0 +1,265 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>FastAPI WebSocket Chat</title>
+    <!-- Tailwind CSS CDN for quick styling -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #f0f2f5;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            margin: 0;
+        }
+        .chat-container {
+            width: 100%;
+            max-width: 600px;
+            background-color: #ffffff;
+            border-radius: 1rem;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+            min-height: 70vh;
+            max-height: 90vh; /* Ensure it has a max height for scrolling */
+        }
+        .messages {
+            flex-grow: 1;
+            overflow-y: auto; /* This is crucial for scrolling */
+            padding: 1.5rem;
+            background-color: #f9fafb;
+            border-bottom: 1px solid #e5e7eb;
+            /* Ensure it has a defined height if flex-grow isn't working as expected */
+            /* For debugging, you could temporarily set a fixed height: height: 400px; */
+        }
+        .message-bubble {
+            background-color: #e0f2fe; /* Light blue for received */
+            padding: 0.75rem 1rem;
+            border-radius: 1rem;
+            margin-bottom: 0.75rem;
+            max-width: 80%;
+            word-wrap: break-word;
+            box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
+        }
+        .message-bubble.sent {
+            background-color: #d1fae5; /* Light green for sent */
+            align-self: flex-end;
+        }
+        .message-info {
+            font-size: 0.75rem;
+            color: #6b7280;
+            margin-bottom: 0.25rem;
+        }
+        .message-content {
+            font-size: 0.95rem;
+            color: #374151;
+        }
+    </style>
+</head>
+<body class="bg-gray-100 flex items-center justify-center min-h-screen p-4">
+
+    <div class="chat-container">
+        <div class="p-4 bg-blue-600 text-white text-center text-xl font-bold rounded-t-xl">
+            FastAPI Chat
+        </div>
+
+        <div class="p-4 space-y-3 border-b border-gray-200">
+            <div>
+                <label for="roomInput" class="block text-sm font-medium text-gray-700">Room ID:</label>
+                <input type="text" id="roomInput" value="general" class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm">
+            </div>
+            <div>
+                <label for="tokenInput" class="block text-sm font-medium text-gray-700">JWT Token:</label>
+                <input type="text" id="tokenInput" placeholder="Enter your JWT token" class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm">
+            </div>
+            <button id="connectBtn" class="w-full bg-blue-500 hover:bg-blue-600 text-white font-bold py-2 px-4 rounded-lg shadow-md transition duration-200 ease-in-out transform hover:scale-105">
+                Connect
+            </button>
+            <div id="status" class="text-sm font-medium text-gray-600 mt-2 text-center">Disconnected</div>
+        </div>
+
+        <div class="messages flex flex-col p-4 space-y-3" id="messages">
+            <!-- Messages will be appended here -->
+        </div>
+
+        <div class="p-4 border-t border-gray-200 bg-white">
+            <div class="flex space-x-3">
+                <input type="text" id="messageInput" placeholder="Type a message..." class="flex-grow px-4 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500">
+                <button id="sendBtn" class="bg-green-500 hover:bg-green-600 text-white font-bold py-2 px-4 rounded-lg shadow-md transition duration-200 ease-in-out transform hover:scale-105">
+                    Send
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const roomInput = document.getElementById('roomInput');
+        const tokenInput = document.getElementById('tokenInput');
+        const connectBtn = document.getElementById('connectBtn');
+        const statusDiv = document.getElementById('status');
+        const messagesDiv = document.getElementById('messages');
+        const messageInput = document.getElementById('messageInput');
+        const sendBtn = document.getElementById('sendBtn');
+
+        let ws = null;
+        let currentUserId = null; // To identify current user's messages
+
+        // --- DEBUGGING START ---
+        console.log('messagesDiv element:', messagesDiv);
+        if (!messagesDiv) {
+            console.error("ERROR: messagesDiv element not found! Check ID 'messages' in HTML.");
+        }
+        // --- DEBUGGING END ---
+
+        // Function to display messages in the chat area
+        function displayMessage(messageData, isSent = false) {
+            // --- DEBUGGING START ---
+            console.log('displayMessage called with:', messageData, 'isSent:', isSent);
+            if (!messageData || !messageData.content) {
+                console.warn("displayMessage: messageData or content is missing!", messageData);
+                return; // Prevent errors if data is incomplete
+            }
+            // --- DEBUGGING END ---
+
+            const messageWrapper = document.createElement('div');
+            messageWrapper.className = `flex ${isSent ? 'justify-end' : 'justify-start'}`;
+            // --- DEBUGGING START ---
+            console.log('messageWrapper created:', messageWrapper);
+            // --- DEBUGGING END ---
+
+            const messageBubble = document.createElement('div');
+            messageBubble.className = `message-bubble ${isSent ? 'sent' : ''}`;
+
+            const messageInfo = document.createElement('div');
+            messageInfo.className = 'message-info';
+            const timestamp = new Date(messageData.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+            messageInfo.textContent = `${messageData.username || 'Unknown'} at ${timestamp}`;
+
+            const messageContent = document.createElement('div');
+            messageContent.className = 'message-content';
+            messageContent.textContent = messageData.content;
+
+            messageBubble.appendChild(messageInfo);
+            messageBubble.appendChild(messageContent);
+            messageWrapper.appendChild(messageBubble);
+            messagesDiv.appendChild(messageWrapper); // <-- This is the append operation
+
+            // --- DEBUGGING START ---
+            console.log('Message appended to messagesDiv. Current messagesDiv content:', messagesDiv.innerHTML);
+            // --- DEBUGGING END ---
+
+            // Scroll to the bottom
+            messagesDiv.scrollTop = messagesDiv.scrollHeight;
+        }
+
+        // Connect to WebSocket
+        connectBtn.addEventListener('click', () => {
+            if (ws && ws.readyState === WebSocket.OPEN) {
+                ws.close(); // Close existing connection if any
+            }
+
+            const room_id = roomInput.value;
+            const token = tokenInput.value;
+
+            if (!room_id || !token) {
+                statusDiv.textContent = 'Error: Room ID and JWT Token are required.';
+                statusDiv.classList.remove('text-gray-600', 'text-green-600');
+                statusDiv.classList.add('text-red-600');
+                return;
+            }
+
+            // Ensure the correct /api/v1 prefix
+            const wsUrl = `ws://localhost:8000/api/v1/chat/ws/${room_id}?token=${token}`;
+            ws = new WebSocket(wsUrl);
+
+            statusDiv.textContent = 'Connecting...';
+            statusDiv.classList.remove('text-green-600', 'text-red-600');
+            statusDiv.classList.add('text-gray-600');
+            messagesDiv.innerHTML = ''; // Clear previous messages
+
+            ws.onopen = (event) => {
+                statusDiv.textContent = `Connected to room: ${room_id}`;
+                statusDiv.classList.remove('text-gray-600', 'text-red-600');
+                statusDiv.classList.add('text-green-600');
+                console.log('WebSocket opened:', event);
+            };
+
+            ws.onmessage = (event) => {
+                // --- DEBUGGING START ---
+                console.log('Raw WebSocket message received:', event.data);
+                // --- DEBUGGING END ---
+                try {
+                    const messageData = JSON.parse(event.data);
+                    if (messageData.id && messageData.user_id && messageData.content && messageData.timestamp) {
+                        // A robust client would parse the JWT token here to get its own user_id
+                        // For this example, let's just assume the current user's username is extracted from the token
+                        const isSent = messageData.username === getUsernameFromJwt(tokenInput.value);
+                        displayMessage(messageData, isSent);
+                    } else {
+                        console.warn("Received non-chat message or malformed message:", messageData);
+                    }
+                } catch (e) {
+                    console.error("Error parsing message or unexpected message format:", e, event.data);
+                }
+            };
+
+            ws.onclose = (event) => {
+                statusDiv.textContent = 'Disconnected';
+                statusDiv.classList.remove('text-green-600', 'text-gray-600');
+                statusDiv.classList.add('text-red-600');
+                console.log('WebSocket closed:', event);
+                ws = null;
+            };
+
+            ws.onerror = (event) => {
+                statusDiv.textContent = 'Connection Error';
+                statusDiv.classList.remove('text-green-600', 'text-gray-600');
+                statusDiv.classList.add('text-red-600');
+                console.error('WebSocket error:', event);
+            };
+        });
+
+        // Send message
+        sendBtn.addEventListener('click', () => {
+            if (ws && ws.readyState === WebSocket.OPEN) {
+                const message = messageInput.value;
+                if (message.trim()) {
+                    ws.send(message);
+                    messageInput.value = ''; // Clear input field
+                }
+            } else {
+                statusDiv.textContent = 'Not connected. Please connect first.';
+                statusDiv.classList.remove('text-green-600', 'text-gray-600');
+                statusDiv.classList.add('text-red-600');
+            }
+        });
+
+        // Allow sending message with Enter key
+        messageInput.addEventListener('keypress', (event) => {
+            if (event.key === 'Enter') {
+                sendBtn.click();
+            }
+        });
+
+        // Helper to attempt to get username from JWT (client-side, for display purposes)
+        function getUsernameFromJwt(token) {
+            try {
+                const base64Url = token.split('.')[1];
+                const base64 = base64Url.replace(/-/g, '+').replace(/_/g, '/');
+                const jsonPayload = decodeURIComponent(atob(base64).split('').map(function(c) {
+                    return '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2);
+                }).join(''));
+                return JSON.parse(jsonPayload).sub; // 'sub' is typically the username
+            } catch (e) {
+                console.error("Error decoding JWT for username:", e);
+                return 'Unknown';
+            }
+        }
+    </script>
+</body>
+</html>

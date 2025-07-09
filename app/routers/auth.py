@@ -2,12 +2,12 @@
 Authentication routes for signup and login.
 """
 from fastapi import APIRouter, Depends, HTTPException, status, Form
-from sqlmodel import Session 
-from app.database import get_session 
-from app.models.user import User 
+from sqlmodel import Session
+from app.database import get_session
+from app.models.user import User
 from app.services.user_service import UserService
 from app.services.auth_service import AuthService
-from app.utils.enums import UserRole 
+from app.utils.enums import UserRole
 
 router = APIRouter(prefix="/auth", tags=["authentication"])
 
